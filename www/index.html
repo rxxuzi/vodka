@@ -4,34 +4,45 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Vodka Prediction Dashboard</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="style.css">
-  <!-- Chart.js CDN -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <!-- 日付アダプター（date-fns を利用） -->
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
 </head>
 <body>
-<div class="container">
   <header>
-    <h1>Vodka Dashboard</h1>
+    <h1><i class="fas fa-chart-line"></i>Vodka Dashboard</h1>
   </header>
-  <section class="summary">
-    <div>シンボル: <span id="symbol">-</span></div>
-    <div>時間足: <span id="interval">-</span></div>
-    <div>実行時刻: <span id="timestamp">-</span></div>
-    <div>現在の価格: <span id="current-price">-</span> USD</div>
-  </section>
-  <section class="predictions">
-    <!-- 予測結果のボックスを動的に挿入 -->
-  </section>
-  <section class="chart-container">
-    <canvas id="priceChart"></canvas>
-  </section>
-  <section class="controls">
-    <div id="countdown">次回更新まで: 15秒</div>
-    <button id="refreshBtn">今すぐ更新</button>
-  </section>
-</div>
-<script src="script.js"></script>
+  <main>
+    <section class="summary">
+      <div class="summary-item">
+        <i class="fas fa-coins"></i>
+        <span>シンボル: <span id="symbol">-</span></span>
+      </div>
+      <div class="summary-item">
+        <i class="fas fa-clock"></i>
+        <span>時間足: <span id="interval">-</span></span>
+      </div>
+      <div class="summary-item">
+        <i class="fas fa-calendar-alt"></i>
+        <span>実行時刻: <span id="timestamp">-</span></span>
+      </div>
+      <div class="summary-item">
+        <i class="fas fa-dollar-sign"></i>
+        <span>現在の価格: <span id="current-price">-</span> USD</span>
+      </div>
+    </section>
+    <section class="predictions">
+      <!-- 予測結果のボックスを動的に挿入 -->
+    </section>
+    <section class="chart-container">
+      <canvas id="priceChart"></canvas>
+    </section>
+    <section class="controls">
+      <div id="countdown">次回更新まで: <span id="countdown-value">15</span>秒</div>
+      <button id="refreshBtn"><i class="fas fa-sync-alt"></i> 今すぐ更新</button>
+    </section>
+  </main>
+  <script src="script.js"></script>
 </body>
 </html>
