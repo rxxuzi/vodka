@@ -1,0 +1,12 @@
+{
+    "debug": false,
+    "serve": false,
+    "name": "vodka_btc_1m",
+    "model": "vodka_btc_1m",
+    "symbol": "BTCUSDT",
+    "interval": "1m",
+    "limit": 11,
+    "pred_output": "pred.csv",
+    "fetch_days": 21,
+    "prediction": [1, 5, 10]
+}
