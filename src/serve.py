@@ -24,9 +24,9 @@ if not config.get("serve", False):
 
 # --- 設定パラメータ ---
 SYMBOL = config["symbol"]
-INTERVAL = config["interval"]
-WINDOW_SIZE = config["limit"]           # 例: 11 (過去10本＋現在)
-PREDICTION_OFFSETS = config.get("prediction", [1, 5, 10])  # 予測対象。出力は固定で pred_x, pred_y, pred_z に対応
+INTERVAL = config["interval"]  # 例："1m", "10s", "1h" など
+WINDOW_SIZE = config["limit"]  # 例: 11 (過去10本＋現在)
+PREDICTION_OFFSETS = config.get("prediction", [1, 5, 10])  # 予測対象（サーバ側はそのまま offset 値を返す）
 
 # --- モデル・スケーラーの読み込み ---
 models_dir = os.path.join(BASE_DIR, "models")
@@ -57,7 +57,7 @@ def fetch_klines(symbol, interval, limit):
 
 def extract_close_prices(klines):
     closes = [float(kline[4]) for kline in klines]
-    return np.array(closes).reshape(-1, 1)  # shape: (WINDOW_SIZE, 1)
+    return np.array(closes).reshape(-1, 1)
 
 # --- 逆正規化関数 ---
 def inverse_transform(values):
@@ -67,34 +67,30 @@ def inverse_transform(values):
 def get_prediction():
     try:
         klines = fetch_klines(SYMBOL, INTERVAL, WINDOW_SIZE)
+        closes = extract_close_prices(klines)
+        if closes.shape[0] < WINDOW_SIZE:
+            return {"error": "十分なデータが取得できませんでした。"}
+        current_price = float(closes[-1, 0])
+        scaled_input = scaler.transform(closes)
+        X_input = scaled_input.reshape(1, WINDOW_SIZE, 1)
+        pred_scaled = model.predict(X_input)
+        preds = pred_scaled[0]
+        preds_inv = inverse_transform(preds)
+        # 固定キー 'x', 'y', 'z' に対応
+        pred_dict = {
+            "x": { "after": PREDICTION_OFFSETS[0], "price": float(round(float(preds_inv[0]), 2)) },
+            "y": { "after": PREDICTION_OFFSETS[1], "price": float(round(float(preds_inv[1]), 2)) },
+            "z": { "after": PREDICTION_OFFSETS[2], "price": float(round(float(preds_inv[2]), 2)) }
+        }
+        return {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "symbol": SYMBOL,
+            "interval": INTERVAL,
+            "current_price": float(round(current_price, 2)),
+            "pred": pred_dict
+        }
     except Exception as e:
-        return {"error": f"データ取得エラー: {e}"}
-    
-    closes = extract_close_prices(klines)
-    if closes.shape[0] < WINDOW_SIZE:
-        return {"error": "十分なデータが取得できませんでした。"}
-    
-    current_price = closes[-1, 0]
-    scaled_input = scaler.transform(closes)
-    X_input = scaled_input.reshape(1, WINDOW_SIZE, 1)
-    
-    pred_scaled = model.predict(X_input)
-    preds = pred_scaled[0]  # 例: [pred_for_offset1, pred_for_offset2, pred_for_offset3]
-    preds_inv = inverse_transform(preds)
-    
-    # 固定キー 'x', 'y', 'z' に対応（拡張性のため）
-    pred_dict = {
-        "x": round(preds_inv[0], 2),
-        "y": round(preds_inv[1], 2),
-        "z": round(preds_inv[2], 2)
-    }
-    
-    return {
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "symbol": SYMBOL,
-        "current_price": round(current_price, 2),
-        "pred": pred_dict
-    }
+        return {"error": f"予測処理エラー: {e}"}
 
 # --- Flask アプリケーションの構築 ---
 # 静的ファイルはプロジェクトルートの "www" ディレクトリに配置
@@ -103,7 +99,6 @@ app = Flask(__name__, static_folder=www_dir, static_url_path="")
 
 @app.route("/")
 def index():
-    # www/index.html を返す
     return app.send_static_file("index.html")
 
 @app.route("/api/")

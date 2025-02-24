@@ -6,3 +6,4 @@ scikit-learn
 requests
 dotenv
 rich
+flask

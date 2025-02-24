@@ -2,17 +2,36 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Vodka Prediction Dashboard</title>
   <link rel="stylesheet" href="style.css">
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- 日付アダプター（date-fns を利用） -->
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
 </head>
 <body>
-  <div class="container">
-    <h1>Vodka Prediction Dashboard</h1>
-    <div id="prediction">
-      <!-- 予測結果がここに表示されます -->
-    </div>
-    <button id="refreshBtn">Update Now</button>
-  </div>
-  <script src="script.js"></script>
+<div class="container">
+  <header>
+    <h1>Vodka Dashboard</h1>
+  </header>
+  <section class="summary">
+    <div>シンボル: <span id="symbol">-</span></div>
+    <div>時間足: <span id="interval">-</span></div>
+    <div>実行時刻: <span id="timestamp">-</span></div>
+    <div>現在の価格: <span id="current-price">-</span> USD</div>
+  </section>
+  <section class="predictions">
+    <!-- 予測結果のボックスを動的に挿入 -->
+  </section>
+  <section class="chart-container">
+    <canvas id="priceChart"></canvas>
+  </section>
+  <section class="controls">
+    <div id="countdown">次回更新まで: 15秒</div>
+    <button id="refreshBtn">今すぐ更新</button>
+  </section>
+</div>
+<script src="script.js"></script>
 </body>
 </html>
