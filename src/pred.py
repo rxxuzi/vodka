@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# deprecated program.
 import os
 import sys
 import time
