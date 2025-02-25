@@ -1,12 +1,18 @@
 {
     "debug": false,
-    "serve": false,
+    "serve": true,
     "name": "vodka_btc_1m",
     "model": "vodka_btc_1m",
     "symbol": "BTCUSDT",
     "interval": "1m",
-    "limit": 11,
+    "limit": 16,
     "pred_output": "pred.csv",
-    "fetch_days": 21,
-    "prediction": [1, 5, 10]
+    "fetch_days": 120,
+    "prediction": [1, 5, 10],
+    "port": 5000,
+    "use_ensemble": false,
+    "ensemble_models": [],
+    "ma_window": 3,
+    "prediction_adjustment": 0.0,
+    "cache_duration": 30
 }

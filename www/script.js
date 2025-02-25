@@ -1,16 +1,17 @@
-// 履歴を保持するグローバル配列（実際の価格と予測価格の履歴）
-let historyActual = [];   // 各要素: { t: Date, price: number }
-let historyPredicted = []; // 各要素: { t: Date, price: number } （予測値：ここでは pred.x を採用）
+// グローバル履歴配列（実際の価格と予測価格の履歴）
+let historyActual = [];    // 各要素: { t: Date, price: number }
+let historyPredicted = []; // 各要素: { t: Date, price: number } （ここでは pred.x を採用）
 
 // 更新カウントダウンタイマー設定（15秒）
 let countdown = 15;
-const COUNTDOWN_INTERVAL = 15; // 秒
+let chart;
+const COUNTDOWN_INTERVAL = 15; // (s)
 
 document.addEventListener('DOMContentLoaded', function() {
     const ctx = document.getElementById('priceChart').getContext('2d');
-    let chart;
+    
 
-    // interval 文字列（例:"10s", "1m", "1h"）を秒数に変換する関数
+    // interval 文字列（例:"1m"）を秒数に変換する関数
     function intervalToSeconds(interval) {
         const num = parseFloat(interval);
         if (interval.endsWith("s")) return num;
@@ -19,7 +20,7 @@ document.addEventListener('DOMContentLoaded', function() {
         return num;
     }
 
-    // offset と interval を組み合わせたラベルを生成する関数
+    // offset と interval を組み合わせたラベル生成
     function formatAfterLabel(offset, interval) {
         const totalSeconds = offset * intervalToSeconds(interval);
         if (totalSeconds < 60) return `${totalSeconds}秒後`;
@@ -39,7 +40,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     setInterval(updateCountdown, 1000);
 
-    // /api/ から予測結果を取得する関数
+    // /api/ から予測結果を取得
     function fetchPrediction() {
         fetch('/api/')
             .then(response => response.json())
@@ -47,7 +48,33 @@ document.addEventListener('DOMContentLoaded', function() {
             .catch(error => console.error('予測取得エラー:', error));
     }
 
-    // ダッシュボード更新：概要情報、予測結果、履歴への追加
+    // /api/history から過去予測履歴を取得し、グローバル履歴に反映
+    function loadHistory() {
+        fetch('/api/history')
+            .then(response => response.json())
+            .then(dataArray => {
+                // dataArray は最新の最大30件の予測結果
+                historyActual = [];
+                historyPredicted = [];
+                dataArray.forEach(data => {
+                    // data.current_price は最新確定価格の値
+                    // data.timestamp は予測取得時刻（文字列）を Date に変換
+                    let actualTime = new Date(data.timestamp);
+                    historyActual.push({ t: actualTime, price: data.current_price });
+                    // ここでは pred.x (1分後予測) を採用し、予測時刻は actualTime に offset 分後を加算
+                    if (data.pred && data.pred.x) {
+                        const baseSeconds = intervalToSeconds(data.interval);
+                        const offsetSeconds = data.pred.x.after * baseSeconds;
+                        let predictedTime = new Date(actualTime.getTime() + offsetSeconds * 1000);
+                        historyPredicted.push({ t: predictedTime, price: data.pred.x.price });
+                    }
+                });
+                updateChart();
+            })
+            .catch(error => console.error('履歴取得エラー:', error));
+    }
+
+    // ダッシュボード更新：概要、予測表示、履歴への追加
     function updateDashboard(data) {
         if (data.error) {
             document.getElementById('symbol').innerText = data.error;
@@ -59,7 +86,7 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('timestamp').innerText = data.timestamp;
         document.getElementById('current-price').innerText = data.current_price.toFixed(2);
 
-        // 予測結果表示（複数予測を個別のボックスで表示）
+        // 予測結果表示（各ボックスに表示）
         const predSection = document.querySelector('.predictions');
         predSection.innerHTML = "";
         Object.keys(data.pred).forEach(key => {
@@ -73,21 +100,26 @@ document.addEventListener('DOMContentLoaded', function() {
             predSection.appendChild(box);
         });
 
-        // 履歴に追加（実際の価格は取得時刻、予測価格は取得時刻 + offset を用いる）
-        const currentTime = new Date();
+        // 履歴に追加
+        const currentTime = new Date(data.timestamp);
         historyActual.push({ t: currentTime, price: data.current_price });
-        // ここでは pred.x（1分後予測）を採用。予測時間 = 現在時刻 + (pred.x.after * interval秒)
-        const baseSeconds = intervalToSeconds(data.interval);
-        const offsetSeconds = data.pred.x.after * baseSeconds;
-        const predictedTime = new Date(currentTime.getTime() + offsetSeconds * 1000);
-        historyPredicted.push({ t: predictedTime, price: data.pred.x.price });
+        // pred.x を採用。予測時刻 = 現在時刻 + (pred.x.after * interval秒)
+        if (data.pred && data.pred.x) {
+            const baseSeconds = intervalToSeconds(data.interval);
+            const offsetSeconds = data.pred.x.after * baseSeconds;
+            let predictedTime = new Date(currentTime.getTime() + offsetSeconds * 1000);
+            historyPredicted.push({ t: predictedTime, price: data.pred.x.price });
+        }
+        // 履歴は最大30件に制限
+        if (historyActual.length > 30) historyActual.shift();
+        if (historyPredicted.length > 30) historyPredicted.shift();
 
         updateChart();
     }
 
-    // チャート更新：時間軸は実際の時刻で表示
+    // チャート更新：実際の価格と予測価格を表示
+    let chart;
     function updateChart() {
-        // X軸ラベルは各履歴の時刻（Date オブジェクト）
         if (!chart) {
             chart = new Chart(ctx, {
                 type: 'line',
@@ -145,8 +177,13 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // 初回取得
+    // 初回に履歴をロードしてチャートを復元
+    loadHistory();
+    // その後、定期更新（15秒ごとに /api/ から最新予測を取得）
+    function periodicUpdate() {
+        fetchPrediction();
+    }
     fetchPrediction();
-    setInterval(fetchPrediction, COUNTDOWN_INTERVAL * 1000);
+    setInterval(periodicUpdate, COUNTDOWN_INTERVAL * 1000);
     document.getElementById('refreshBtn').addEventListener('click', fetchPrediction);
 });
