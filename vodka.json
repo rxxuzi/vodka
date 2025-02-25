@@ -9,6 +9,18 @@
     "pred_output": "pred.csv",
     "fetch_days": 120,
     "prediction": [1, 5, 10],
+    "transformer" : {
+        "d_model": 256,
+        "num_heads": 4,
+        "num_transformer_blocks": 3,
+        "ff_dim": 256,
+        "dropout_rate": 0.3,
+        "lr": 0.0003,
+        "hidden_layer": 512,
+        "epochs": 150,
+        "batch_size": 64,
+        "optimizer" : "AdamW"
+    },
     "port": 5000,
     "use_ensemble": false,
     "ensemble_models": [],
