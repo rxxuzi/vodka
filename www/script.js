@@ -1,15 +1,13 @@
-// グローバル履歴配列（実際の価格と予測価格の履歴）
+// グローバル履歴配列
 let historyActual = [];    // 各要素: { t: Date, price: number }
-let historyPredicted = []; // 各要素: { t: Date, price: number } （ここでは pred.x を採用）
+let historyPredicted = []; // 各要素: { t: Date, price: number }（予測価格）
 
-// 更新カウントダウンタイマー設定（15秒）
 let countdown = 15;
 let chart;
-const COUNTDOWN_INTERVAL = 15; // (s)
+const COUNTDOWN_INTERVAL = 15; // (秒)
 
 document.addEventListener('DOMContentLoaded', function() {
     const ctx = document.getElementById('priceChart').getContext('2d');
-    
 
     // interval 文字列（例:"1m"）を秒数に変換する関数
     function intervalToSeconds(interval) {
@@ -53,22 +51,21 @@ document.addEventListener('DOMContentLoaded', function() {
         fetch('/api/history')
             .then(response => response.json())
             .then(dataArray => {
-                // dataArray は最新の最大30件の予測結果
                 historyActual = [];
                 historyPredicted = [];
                 dataArray.forEach(data => {
-                    // data.current_price は最新確定価格の値
-                    // data.timestamp は予測取得時刻（文字列）を Date に変換
                     let actualTime = new Date(data.timestamp);
                     historyActual.push({ t: actualTime, price: data.current_price });
-                    // ここでは pred.x (1分後予測) を採用し、予測時刻は actualTime に offset 分後を加算
                     if (data.pred && data.pred.x) {
                         const baseSeconds = intervalToSeconds(data.interval);
                         const offsetSeconds = data.pred.x.after * baseSeconds;
                         let predictedTime = new Date(actualTime.getTime() + offsetSeconds * 1000);
-                        historyPredicted.push({ t: predictedTime, price: data.pred.x.price });
+                        let predictedPrice = data.current_price * (1 + data.pred.x.rate / 100);
+                        historyPredicted.push({ t: predictedTime, price: predictedPrice });
                     }
                 });
+                while (historyActual.length > 50) historyActual.shift();
+                while (historyPredicted.length > 50) historyPredicted.shift();
                 updateChart();
             })
             .catch(error => console.error('履歴取得エラー:', error));
@@ -91,34 +88,41 @@ document.addEventListener('DOMContentLoaded', function() {
         predSection.innerHTML = "";
         Object.keys(data.pred).forEach(key => {
             const pred = data.pred[key];
+            // 予測価格 = 現在の価格 * (1 + 予測変動率/100)
+            let predictedPrice = data.current_price * (1 + pred.rate / 100);
+            // 価格が上がっていれば緑、下がっていれば赤
+            const colorClass = predictedPrice >= data.current_price ? "green" : "red";
             const label = formatAfterLabel(pred.after, data.interval);
-            const diff = pred.price - data.current_price;
-            const colorClass = diff >= 0 ? "green" : "red";
+            // 変動率の文字列（例: "+1.00%"）
+            let percentageChange = ((predictedPrice - data.current_price) / data.current_price) * 100;
+            const changeText = (percentageChange >= 0 ? "+" : "") + percentageChange.toFixed(2) + " %";
+
             const box = document.createElement("div");
             box.className = "prediction-box";
-            box.innerHTML = `<h3>${label}</h3><p class="${colorClass}">${pred.price.toFixed(2)} USD</p>`;
+            // 予測価格と下に変動率を表示
+            box.innerHTML = `<h3>${label}</h3>
+                             <p class="${colorClass}">${predictedPrice.toFixed(2)} USD</p>
+                             <p class="${colorClass}" style="font-size:0.9em;">${changeText}</p>`;
             predSection.appendChild(box);
         });
 
         // 履歴に追加
         const currentTime = new Date(data.timestamp);
         historyActual.push({ t: currentTime, price: data.current_price });
-        // pred.x を採用。予測時刻 = 現在時刻 + (pred.x.after * interval秒)
         if (data.pred && data.pred.x) {
             const baseSeconds = intervalToSeconds(data.interval);
             const offsetSeconds = data.pred.x.after * baseSeconds;
             let predictedTime = new Date(currentTime.getTime() + offsetSeconds * 1000);
-            historyPredicted.push({ t: predictedTime, price: data.pred.x.price });
+            let predictedPrice = data.current_price * (1 + data.pred.x.rate / 100);
+            historyPredicted.push({ t: predictedTime, price: predictedPrice });
         }
-        // 履歴は最大30件に制限
-        if (historyActual.length > 30) historyActual.shift();
-        if (historyPredicted.length > 30) historyPredicted.shift();
+        while (historyActual.length > 50) historyActual.shift();
+        while (historyPredicted.length > 50) historyPredicted.shift();
 
         updateChart();
     }
 
-    // チャート更新：実際の価格と予測価格を表示
-    let chart;
+    // チャート更新：実際の価格と予測価格を同一軸で表示
     function updateChart() {
         if (!chart) {
             chart = new Chart(ctx, {
@@ -126,32 +130,43 @@ document.addEventListener('DOMContentLoaded', function() {
                 data: {
                     datasets: [
                         {
-                            label: '実際の価格',
+                            label: '実際の価格 (USD)',
                             data: historyActual,
                             borderColor: 'rgba(54, 162, 235, 1)',
                             backgroundColor: 'rgba(54, 162, 235, 0.2)',
                             fill: false,
-                            tension: 0.3
+                            tension: 0.3,
+                            yAxisID: 'price-axis',
+                            parsing: {
+                                xAxisKey: 't',
+                                yAxisKey: 'price'
+                            }
                         },
                         {
-                            label: '予測価格 (1分後)',
+                            label: '予測価格 (USD)',
                             data: historyPredicted,
                             borderColor: 'rgba(255, 159, 64, 1)',
                             backgroundColor: 'rgba(255, 159, 64, 0.2)',
                             borderDash: [5, 5],
                             fill: false,
-                            tension: 0.3
+                            tension: 0.3,
+                            yAxisID: 'price-axis',
+                            parsing: {
+                                xAxisKey: 't',
+                                yAxisKey: 'price'
+                            }
                         }
                     ]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    parsing: {
-                        xAxisKey: 't',
-                        yAxisKey: 'price'
-                    },
                     scales: {
+                        'price-axis': {
+                            type: 'linear',
+                            position: 'left',
+                            title: { display: true, text: '価格 (USD)' }
+                        },
                         x: {
                             type: 'time',
                             time: {
@@ -159,10 +174,6 @@ document.addEventListener('DOMContentLoaded', function() {
                                 unit: 'minute'
                             },
                             title: { display: true, text: '時刻' }
-                        },
-                        y: {
-                            title: { display: true, text: '価格 (USD)' },
-                            beginAtZero: false
                         }
                     },
                     plugins: {
@@ -179,7 +190,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 初回に履歴をロードしてチャートを復元
     loadHistory();
-    // その後、定期更新（15秒ごとに /api/ から最新予測を取得）
+    // 定期更新（15秒ごとに /api/ から最新予測を取得）
     function periodicUpdate() {
         fetchPrediction();
     }

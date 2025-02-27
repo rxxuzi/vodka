@@ -134,21 +134,22 @@ def get_prediction(use_cache=True):
         scaled_input = scalers["primary"].transform(input_window)  # shape: (WINDOW_SIZE, 5)
         X_input = scaled_input.reshape(1, WINDOW_SIZE, 5)
 
-        primary_pred_scaled = models["primary"].predict(X_input, verbose=0)
-        primary_preds = primary_pred_scaled[0]  # shape: (len(PREDICTION_OFFSETS),)
-        primary_preds_inv = inverse_close(primary_preds, scalers["primary"])
-        
-        final_preds = moving_average_smoothing(primary_preds_inv)
+        primary_pred = models["primary"].predict(X_input, verbose=0)
+        primary_preds = primary_pred[0]  # 予測された変動率（例: 0.05 は 5%の上昇）
+        # パーセンテージ表示に変換
+        predicted_rates = primary_preds * 100
+        final_preds = moving_average_smoothing(predicted_rates)
         adjusted_preds = final_preds + PREDICTION_ADJUSTMENT
 
-        prediction_keys = ["x", "y", "z"]  # Corresponding to each offset
+        prediction_keys = ["x", "y", "z"]  # 対応するオフセット
         pred_dict = {}
         for i, key in enumerate(prediction_keys):
             if i < len(adjusted_preds):
                 pred_dict[key] = {
                     "after": PREDICTION_OFFSETS[i],
-                    "price": float(round(adjusted_preds[i], 2))
+                    "rate": float(round(adjusted_preds[i], 2))
                 }
+
         result = {
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "symbol": SYMBOL,

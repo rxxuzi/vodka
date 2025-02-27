@@ -37,6 +37,7 @@ hidden_layer = transformer_config["hidden_layer"]
 epochs = transformer_config["epochs"]
 batch_size = transformer_config["batch_size"]
 optimizer = transformer_config["optimizer"]
+min_lr = 1e-6
 
 # --- Debugモード設定 ---
 if not config.get("debug", False):
@@ -63,9 +64,11 @@ prediction_offsets = config["prediction"]
 max_offset = max(prediction_offsets)
 
 X, y = [], []
-for i in range(window_size, len(scaled_data) - max_offset):
+for i in range(window_size, len(data) - max_offset):
     X.append(scaled_data[i - window_size:i])
-    y.append([scaled_data[i + offset][3] for offset in prediction_offsets])
+    current_close = data[i - 1][3]
+    y.append([ (data[i + offset][3] - current_close) / current_close for offset in prediction_offsets ])
+
 X = np.array(X)
 y = np.array(y)
 
@@ -101,7 +104,7 @@ model.summary()
 
 # --- コールバックの設定 ---
 early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
-reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, min_lr=1e-6)
+reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, min_lr=min_lr)
 
 # --- 学習開始 ---
 train_start_time = time.time()
@@ -119,15 +122,11 @@ elapsed_time = train_end_time - train_start_time
 # --- 予測と評価 ---
 train_predict = model.predict(X_train)
 test_predict = model.predict(X_test)
+train_predict_rate = train_predict * 100
+y_train_rate = y_train * 100
+test_predict_rate = test_predict * 100
+y_test_rate = y_test * 100
 
-# 逆正規化関数
-def inverse_close(scaled_values, scaler):
-    return scaled_values * scaler.scale_[3] + scaler.mean_[3]
-
-train_predict_inv = inverse_close(train_predict, scaler)
-y_train_inv = inverse_close(y_train, scaler)
-test_predict_inv = inverse_close(test_predict, scaler)
-y_test_inv = inverse_close(y_test, scaler)
 
 # --- 学習履歴の保存 ---
 log_dir = os.path.join(BASE_DIR, "logs")

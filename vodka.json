@@ -1,8 +1,8 @@
 {
     "debug": false,
     "serve": true,
-    "name": "vodka_btc_1m",
-    "model": "vodka_btc_1m",
+    "name": "vodka_btc_1m-v2",
+    "model": "vodka_btc_1m-v2",
     "symbol": "BTCUSDT",
     "interval": "1m",
     "limit": 16,
