@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # fetch.py
 
 import os
@@ -6,16 +5,12 @@ import time
 import requests
 import pandas as pd
 import json
-from dotenv import load_dotenv
 
 # --- 設定ファイルの読み込み ---
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 CONFIG_PATH = os.path.join(BASE_DIR, "vodka.json")
 with open(CONFIG_PATH, "r") as f:
     config = json.load(f)
-
-# .envファイルが存在すれば読み込む
-load_dotenv()
 
 # --- 設定パラメータ ---
 symbol = config.get("symbol", "BTCUSDT")
@@ -58,7 +53,7 @@ def process_klines_to_df(data):
         data (list): Binance APIから取得した生データ。
 
     戻り値:
-        DataFrame: 変換されたデータ（モデル学習向けに適切なカラムを含む）。
+        DataFrame: 変換されたデータ（元データにテクニカル指標追加前）。
     """
     columns = [
         'Open Time', 'Open', 'High', 'Low', 'Close', 'Volume',
@@ -68,7 +63,7 @@ def process_klines_to_df(data):
     df = pd.DataFrame(data, columns=columns)
     df['Open Time'] = pd.to_datetime(df['Open Time'], unit='ms')
     df['Close Time'] = pd.to_datetime(df['Close Time'], unit='ms')
-    # 数値カラムを適切なデータ型に変換
+    # 数値カラムの変換
     numeric_cols = ['Open', 'High', 'Low', 'Close', 'Volume',
                     'Quote Asset Volume', 'Number of Trades', 
                     'Taker Buy Base Asset Volume', 'Taker Buy Quote Asset Volume']
@@ -79,11 +74,37 @@ def process_klines_to_df(data):
         df = df.drop(columns=['Ignore'])
     return df
 
+def add_technical_indicators(df):
+    """
+    取得済みのローソク足データにテクニカル指標（SMA, EMA, TP, VWAP_5）を追加する。
+    
+    例:
+        SMA_5, SMA_10, SMA_20 : 終値の単純移動平均
+        EMA_5, EMA_10, EMA_20 : 終値の指数移動平均
+        TP                  : Typical Price = (High + Low + Close) / 3
+        VWAP_5              : 5期間のVWAP = rolling_sum(TP*Volume) / rolling_sum(Volume)
+    """
+    # Typical Priceの算出
+    df['TP'] = (df['High'] + df['Low'] + df['Close']) / 3
+    
+    # SMA
+    df['SMA_5'] = df['Close'].rolling(window=5).mean()
+    df['SMA_10'] = df['Close'].rolling(window=10).mean()
+    df['SMA_20'] = df['Close'].rolling(window=20).mean()
+    
+    # EMA
+    df['EMA_5'] = df['Close'].ewm(span=5, adjust=False).mean()
+    df['EMA_10'] = df['Close'].ewm(span=10, adjust=False).mean()
+    df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
+    
+    # VWAP_5 : rolling VWAP = rolling_sum(TP * Volume) / rolling_sum(Volume)
+    df['VWAP_5'] = (df['TP'] * df['Volume']).rolling(window=5).sum() / df['Volume'].rolling(window=5).sum()
+    
+    return df
+
 def fetch_historical_data(symbol="BTCUSDT", interval="1m", days=7):
     """
-    Binance APIから過去のローソク足データを取得し、CSVファイルとして保存する。
-    取得するデータには複数の特徴量（Open, High, Low, Close など）が含まれ、
-    モデルの学習精度向上に活用できる。
+    Binance APIから過去のローソク足データを取得し、テクニカル指標も追加してCSVファイルとして保存する。
 
     引数:
         symbol (str): 取引ペア。
@@ -99,6 +120,7 @@ def fetch_historical_data(symbol="BTCUSDT", interval="1m", days=7):
             if not raw_data:
                 break
             df = process_klines_to_df(raw_data)
+            df = add_technical_indicators(df)
             all_data.append(df)
             # 次回取得開始時間を更新（最後のClose Time + 1ミリ秒）
             start_time = int(df['Close Time'].iloc[-1].timestamp() * 1000) + 1
@@ -117,5 +139,8 @@ def fetch_historical_data(symbol="BTCUSDT", interval="1m", days=7):
     else:
         print("データを取得できませんでした。")
 
-if __name__ == "__main__":
+def run():
     fetch_historical_data(symbol=symbol, interval=interval, days=days)
+
+if __name__ == "__main__":
+    run()

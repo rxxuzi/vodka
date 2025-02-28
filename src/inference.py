@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # inference.py
 
 import os
@@ -92,62 +91,66 @@ def extract_features(klines):
 
 def moving_average_smoothing(values, window=MOVING_AVERAGE_WINDOW):
     """Apply moving average smoothing to predictions."""
-    if window <= 1 or window > len(values):
+    if window <= 1 or len(values) < window:
         return values
     result = np.copy(values)
     for i in range(len(values) - window + 1):
         result[i + window - 1] = np.mean(values[i:i+window])
     return result
 
-def inverse_close(scaled_values, scaler):
-    """
-    Inverse normalization for predicted Close value.
-    Assumes that the scaler was fit on 5 features and Close is at index 3.
-    """
-    close_mean = scaler.mean_[3]
-    close_std = scaler.scale_[3]
-    return scaled_values * close_std + close_mean
-
 # --- Main Inference Function ---
 
 def get_prediction(use_cache=True):
     """
     Generate price predictions.
-    1. Fetch the latest (WINDOW_SIZE + max(PREDICTION_OFFSETS)) candles.
-    2. Use the most recent WINDOW_SIZE candles (all 5 features) as model input.
-    3. The model outputs scaled Close values for each offset.
-    4. Inverse transform using the Close parameters.
+    1. Fetch the latest WINDOW_SIZE candles.
+    2. Use these candles as model input.
+    3. The model outputs percentage changes for each offset.
+    4. Calculate the predicted prices based on the current price.
     """
     current_time = time.time()
     if use_cache and _cache["prediction"] is not None and (current_time - _cache["timestamp"]) < CACHE_DURATION:
         return _cache["prediction"]
 
     try:
-        required_length = WINDOW_SIZE + max(PREDICTION_OFFSETS)
-        klines = fetch_klines(SYMBOL, INTERVAL, required_length)
-        features_arr = extract_features(klines)  # shape: (required_length, 5)
+        # Fetch just enough data for the window size
+        klines = fetch_klines(SYMBOL, INTERVAL, WINDOW_SIZE)
+        features_arr = extract_features(klines)  # shape: (WINDOW_SIZE, 5)
+        
         if features_arr.shape[0] < WINDOW_SIZE:
             logger.error(f"Insufficient historical data: got {features_arr.shape[0]}, need {WINDOW_SIZE}")
             return {"error": "Insufficient historical data."}
+            
         current_price = features_arr[-1, 3]  # Close of the last candle
-        input_window = features_arr[-WINDOW_SIZE:]  # shape: (WINDOW_SIZE, 5)
-        scaled_input = scalers["primary"].transform(input_window)  # shape: (WINDOW_SIZE, 5)
+        
+        # Scale the input data
+        scaled_input = scalers["primary"].transform(features_arr)  # shape: (WINDOW_SIZE, 5)
         X_input = scaled_input.reshape(1, WINDOW_SIZE, 5)
-
+        
+        # Get raw predictions (these are already percentage changes as trained in train.py)
         primary_pred = models["primary"].predict(X_input, verbose=0)
-        primary_preds = primary_pred[0]  # 予測された変動率（例: 0.05 は 5%の上昇）
-        # パーセンテージ表示に変換
-        predicted_rates = primary_preds * 100
-        final_preds = moving_average_smoothing(predicted_rates)
-        adjusted_preds = final_preds + PREDICTION_ADJUSTMENT
-
+        predicted_rates = primary_pred[0]  # 直接パーセンテージ値が出力される
+        
+        # Apply smoothing and adjustment if needed
+        adjusted_preds = moving_average_smoothing(predicted_rates) + PREDICTION_ADJUSTMENT
+        
+        # Debug logs to check predictions
+        logger.debug(f"Raw predictions: {predicted_rates}")
+        logger.debug(f"Adjusted predictions: {adjusted_preds}")
+        
+        # Format predictions for response
         prediction_keys = ["x", "y", "z"]  # 対応するオフセット
         pred_dict = {}
         for i, key in enumerate(prediction_keys):
             if i < len(adjusted_preds):
+                # 予測された変動率（%）をもとに将来価格を計算
+                rate_pct = float(round(adjusted_preds[i], 2))
+                predicted_price = current_price * (1 + rate_pct/100)
+                
                 pred_dict[key] = {
                     "after": PREDICTION_OFFSETS[i],
-                    "rate": float(round(adjusted_preds[i], 2))
+                    "rate": rate_pct,
+                    "predicted_price": float(round(predicted_price, 2))
                 }
 
         result = {
@@ -159,8 +162,9 @@ def get_prediction(use_cache=True):
         }
         _cache["prediction"] = result
         _cache["timestamp"] = current_time
-        logger.debug(f"Generated prediction: {pred_dict}")
+        logger.debug(f"Generated prediction: {result}")
         return result
+        
     except Exception as e:
         logger.error(f"Prediction error: {e}", exc_info=True)
         if _cache["prediction"] is not None:
