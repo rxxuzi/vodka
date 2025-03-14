@@ -1,13 +1,14 @@
 {
+    "version":"3.0",
     "debug": false,
     "serve": true,
-    "name": "vodka_btc_1m-v2",
-    "model": "vodka_btc_1m-v2",
+    "name": "vodka_btc_1m",
+    "model": "vodka_btc_1m",
     "symbol": "BTCUSDT",
     "interval": "1m",
     "limit": 16,
     "pred_output": "pred.csv",
-    "fetch_days": 120,
+    "fetch_days": 3,
     "prediction": [1, 5, 10],
     "transformer" : {
         "d_model": 256,

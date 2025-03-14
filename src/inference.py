@@ -7,6 +7,7 @@ import numpy as np
 import pickle
 import json
 import logging
+import pandas as pd
 from datetime import datetime
 from tensorflow.keras.models import load_model
 from sklearn.preprocessing import StandardScaler
@@ -42,23 +43,61 @@ CACHE_DURATION = config.get("cache_duration", 30)
 models_dir = os.path.join(BASE_DIR, "models")
 
 def load_models_and_scalers():
+    """
+    Load the trained model, scaler, and any additional configuration needed for inference.
+    """
     models = {}
     scalers = {}
+    model_config = {}
+    
     model_filename = f"{MODEL_NAME}.h5"
     model_path = os.path.join(models_dir, model_filename)
+    
     scaler_filename = f"{MODEL_NAME}_scaler.pkl"
     scaler_path = os.path.join(models_dir, scaler_filename)
+    
+    # Try to load adjustment configuration (added in new training script)
+    adj_filename = f"{MODEL_NAME}_adjustment.json"
+    adj_path = os.path.join(models_dir, adj_filename)
+    
     try:
+        # Load model
         models["primary"] = load_model(model_path, custom_objects={"PositionalEncoding": PositionalEncoding})
+        logger.debug("Primary model loaded.")
+        
+        # Load scaler
         with open(scaler_path, "rb") as f:
             scalers["primary"] = pickle.load(f)
-        logger.debug("Primary model and scaler loaded.")
+        logger.debug("Primary scaler loaded.")
+        
+        # Try to load adjustment config if it exists
+        if os.path.exists(adj_path):
+            with open(adj_path, "r") as f:
+                model_config = json.load(f)
+            logger.debug(f"Found adjustment config: {model_config}")
+        else:
+            # Default values if file doesn't exist
+            model_config = {
+                "target_amplification": 1.0,
+                "use_log_returns": False
+            }
+            logger.debug("No adjustment config found, using defaults.")
+        
+        # Try to load metadata if it exists
+        meta_path = os.path.join(models_dir, f"{MODEL_NAME}_meta.json")
+        if os.path.exists(meta_path):
+            with open(meta_path, "r") as f:
+                meta = json.load(f)
+            model_config.update(meta)
+            logger.debug(f"Loaded model metadata: {meta}")
+        
     except Exception as e:
-        logger.error(f"Error loading primary model or scaler: {e}")
+        logger.error(f"Error loading model, scaler, or config: {e}")
         raise e
-    return models, scalers
+    
+    return models, scalers, model_config
 
-models, scalers = load_models_and_scalers()
+models, scalers, model_config = load_models_and_scalers()
 
 # --- Cache for predictions ---
 _cache = {"prediction": None, "timestamp": 0}
@@ -73,101 +112,81 @@ def fetch_klines(symbol, interval, limit):
     response.raise_for_status()
     return response.json()
 
-def extract_features(klines):
+def extract_features(klines, model_config):
     """
-    Extract 5 features (Open, High, Low, Close, Volume) from kline data.
-    Binance kline: index 1: Open, 2: High, 3: Low, 4: Close, 5: Volume.
+    Extract features from kline data based on model configuration.
+    
+    Args:
+        klines (list): Raw kline data from Binance API.
+        model_config (dict): Model configuration with feature information.
+        
+    Returns:
+        np.ndarray: Extracted features.
     """
-    features = []
+    # Default features (OHLCV)
+    default_features = ['Open', 'High', 'Low', 'Close', 'Volume']
+    
+    # Get features from config if available
+    features = model_config.get("features", default_features)
+    
+    # Map between feature names and kline indices
+    feature_map = {
+        'Open': 1,
+        'High': 2,
+        'Low': 3,
+        'Close': 4,
+        'Volume': 5
+    }
+    
+    # Prepare basic features
+    basic_features = []
     for kline in klines:
-        features.append([
-            float(kline[1]),
-            float(kline[2]),
-            float(kline[3]),
-            float(kline[4]),
-            float(kline[5])
-        ])
-    return np.array(features)  # shape: (num_candles, 5)
-
-def moving_average_smoothing(values, window=MOVING_AVERAGE_WINDOW):
-    """Apply moving average smoothing to predictions."""
-    if window <= 1 or len(values) < window:
-        return values
-    result = np.copy(values)
-    for i in range(len(values) - window + 1):
-        result[i + window - 1] = np.mean(values[i:i+window])
-    return result
-
-# --- Main Inference Function ---
-
-def get_prediction(use_cache=True):
-    """
-    Generate price predictions.
-    1. Fetch the latest WINDOW_SIZE candles.
-    2. Use these candles as model input.
-    3. The model outputs percentage changes for each offset.
-    4. Calculate the predicted prices based on the current price.
-    """
-    current_time = time.time()
-    if use_cache and _cache["prediction"] is not None and (current_time - _cache["timestamp"]) < CACHE_DURATION:
-        return _cache["prediction"]
-
-    try:
-        # Fetch just enough data for the window size
-        klines = fetch_klines(SYMBOL, INTERVAL, WINDOW_SIZE)
-        features_arr = extract_features(klines)  # shape: (WINDOW_SIZE, 5)
+        row = []
+        for feature in features:
+            if feature in feature_map:
+                row.append(float(kline[feature_map[feature]]))
+            else:
+                # For technical indicators, we'll calculate them separately
+                pass
+        basic_features.append(row)
+    
+    basic_features = np.array(basic_features)
+    
+    # Calculate technical indicators if needed
+    if any(f not in feature_map for f in features):
+        # For real-time inference, we need to calculate technical indicators
+        # This is a simplified version - you may need to expand based on which indicators you use
+        df = pd.DataFrame(basic_features, columns=['Open', 'High', 'Low', 'Close', 'Volume'])
         
-        if features_arr.shape[0] < WINDOW_SIZE:
-            logger.error(f"Insufficient historical data: got {features_arr.shape[0]}, need {WINDOW_SIZE}")
-            return {"error": "Insufficient historical data."}
-            
-        current_price = features_arr[-1, 3]  # Close of the last candle
+        # Calculate technical indicators
+        if 'SMA_5' in features:
+            df['SMA_5'] = df['Close'].rolling(window=5).mean()
+        if 'SMA_10' in features:
+            df['SMA_10'] = df['Close'].rolling(window=10).mean()
+        if 'SMA_20' in features:
+            df['SMA_20'] = df['Close'].rolling(window=20).mean()
+        if 'EMA_5' in features:
+            df['EMA_5'] = df['Close'].ewm(span=5, adjust=False).mean()
+        if 'EMA_10' in features:
+            df['EMA_10'] = df['Close'].ewm(span=10, adjust=False).mean()
+        if 'EMA_20' in features:
+            df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
+        if 'TP' in features:
+            df['TP'] = (df['High'] + df['Low'] + df['Close']) / 3
+        if 'VWAP_5' in features and 'TP' in df.columns:
+            df['VWAP_5'] = (df['TP'] * df['Volume']).rolling(window=5).sum() / df['Volume'].rolling(window=5).sum()
         
-        # Scale the input data
-        scaled_input = scalers["primary"].transform(features_arr)  # shape: (WINDOW_SIZE, 5)
-        X_input = scaled_input.reshape(1, WINDOW_SIZE, 5)
+        # Fill NaN values that occur during indicator calculation
+        df = df.fillna(method='bfill').fillna(method='ffill')
         
-        # Get raw predictions (these are already percentage changes as trained in train.py)
-        primary_pred = models["primary"].predict(X_input, verbose=0)
-        predicted_rates = primary_pred[0]  # 直接パーセンテージ値が出力される
+        # Extract all features in the correct order
+        all_features = []
+        for i in range(len(df)):
+            row = []
+            for feature in features:
+                row.append(df[feature].iloc[i])
+            all_features.append(row)
         
-        # Apply smoothing and adjustment if needed
-        adjusted_preds = moving_average_smoothing(predicted_rates) + PREDICTION_ADJUSTMENT
-        
-        # Debug logs to check predictions
-        logger.debug(f"Raw predictions: {predicted_rates}")
-        logger.debug(f"Adjusted predictions: {adjusted_preds}")
-        
-        # Format predictions for response
-        prediction_keys = ["x", "y", "z"]  # 対応するオフセット
-        pred_dict = {}
-        for i, key in enumerate(prediction_keys):
-            if i < len(adjusted_preds):
-                # 予測された変動率（%）をもとに将来価格を計算
-                rate_pct = float(round(adjusted_preds[i], 2))
-                predicted_price = current_price * (1 + rate_pct/100)
-                
-                pred_dict[key] = {
-                    "after": PREDICTION_OFFSETS[i],
-                    "rate": rate_pct,
-                    "predicted_price": float(round(predicted_price, 2))
-                }
-
-        result = {
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "symbol": SYMBOL,
-            "interval": INTERVAL,
-            "current_price": float(round(current_price, 2)),
-            "pred": pred_dict
-        }
-        _cache["prediction"] = result
-        _cache["timestamp"] = current_time
-        logger.debug(f"Generated prediction: {result}")
-        return result
-        
-    except Exception as e:
-        logger.error(f"Prediction error: {e}", exc_info=True)
-        if _cache["prediction"] is not None:
-            logger.warning("Returning stale prediction")
-            return _cache["prediction"]
-        return {"error": str(e)}
+        return np.array(all_features)
+    
+    return basic_featuress

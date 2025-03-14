@@ -35,7 +35,7 @@ if not config.get("serve", False):
 PORT = config.get("port", 5000)
 
 PREDICTION_HISTORY = []
-latest_history = 50
+latest_history = 80
 
 # --- Flask Application ---
 www_dir = os.path.join(BASE_DIR, "www")
