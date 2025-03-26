@@ -189,4 +189,4 @@ def extract_features(klines, model_config):
         
         return np.array(all_features)
     
-    return basic_featuress
+    return basic_features
